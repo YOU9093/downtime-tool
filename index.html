@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>停机记录分析工具</title>
+    <title>停机记录分析工具 - OCR智能版</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <!-- Tesseract.js OCR -->
+    <script src='https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js'></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -88,6 +90,121 @@
             gap: 8px;
         }
         
+        /* 上传区域 */
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: #f0f7ff;
+        }
+        .upload-area.dragover {
+            border-color: var(--primary);
+            background: #e3f2fd;
+        }
+        .upload-icon { font-size: 48px; margin-bottom: 10px; }
+        .upload-text { color: #666; font-size: 14px; }
+        .upload-hint { color: #999; font-size: 12px; margin-top: 8px; }
+        #file-input { display: none; }
+        
+        /* 预览区域 */
+        .preview-box {
+            margin-top: 15px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f5f5f5;
+        }
+        .preview-box img {
+            max-width: 100%;
+            max-height: 300px;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        /* 进度条 */
+        .progress-box {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .progress-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        .progress-text {
+            font-size: 13px;
+            color: #666;
+            margin-top: 8px;
+            text-align: center;
+        }
+        
+        /* OCR结果 */
+        .ocr-result {
+            margin-top: 15px;
+        }
+        .ocr-text {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.6;
+            background: #fafafa;
+            font-family: monospace;
+        }
+        .parsed-records {
+            margin-top: 15px;
+        }
+        .record-preview {
+            background: #f0f7ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .record-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .record-preview-title { font-weight: 600; color: #333; }
+        .record-preview-status {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+        .status-ok { background: #d4edda; color: #155724; }
+        .status-warn { background: #fff3cd; color: #856404; }
+        .record-preview-fields {
+            font-size: 13px;
+            color: #666;
+        }
+        .record-preview-fields span {
+            display: inline-block;
+            margin-right: 15px;
+            margin-bottom: 4px;
+        }
+        .record-checkbox {
+            margin-right: 8px;
+        }
+        
         /* 表单元素 */
         textarea, input, select {
             width: 100%;
@@ -137,6 +254,11 @@
         .btn-warning { background: var(--warning); color: #333; }
         .btn-danger { background: var(--danger); color: white; }
         .btn-gray { background: var(--gray); color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         .btn-group {
             display: flex;
             gap: 10px;
@@ -246,18 +368,6 @@
             top: 0;
         }
         tr:hover { background: #f8f9fa; }
-        .progress-bar {
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 5px;
-        }
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            border-radius: 3px;
-        }
         
         /* 图表 */
         .chart-item {
@@ -271,6 +381,17 @@
         }
         .chart-label { font-weight: 500; }
         .chart-value { color: #666; }
+        .progress-bar-chart {
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .progress-fill-chart {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+        }
         
         /* 空状态 */
         .empty {
@@ -290,12 +411,25 @@
             font-size: 12px;
             color: #999;
         }
+        
+        /* 截图识别结果卡片 */
+        .screenshot-result-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #28a745;
+        }
+        .screenshot-result-card.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>📊 停机记录分析工具</h1>
-        <p>微信群停机统计 → 停机记录表 → 停机分析表</p>
+        <p>支持截图OCR识别 | 批量录入 | 自动统计分析</p>
     </div>
     
     <div class="container">
@@ -330,6 +464,55 @@
         
         <!-- 数据录入 -->
         <div id="tab-input" class="tab-content">
+            <!-- OCR截图上传 -->
+            <div class="card">
+                <div class="card-title">📷 截图自动识别（OCR）</div>
+                <div class="tip">
+                    <strong>💡 使用方法：</strong>直接拖拽截图到下方区域，或点击选择图片。系统会自动识别文字并提取停机记录信息。
+                </div>
+                
+                <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+                    <div class="upload-icon">📤</div>
+                    <div class="upload-text">点击或拖拽截图到这里</div>
+                    <div class="upload-hint">支持 JPG、PNG、GIF 格式，建议截图清晰文字</div>
+                </div>
+                <input type="file" id="file-input" accept="image/*" onchange="handleFileSelect(event)">
+                
+                <!-- 图片预览 -->
+                <div class="preview-box hidden" id="preview-box">
+                    <img id="preview-img" src="" alt="预览">
+                </div>
+                
+                <!-- OCR进度 -->
+                <div class="progress-box hidden" id="progress-box">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-text" id="progress-text">正在初始化OCR引擎...</div>
+                </div>
+                
+                <!-- OCR原始文字 -->
+                <div class="ocr-result hidden" id="ocr-result-box">
+                    <div style="margin-bottom: 10px; font-weight: 600;">📝 识别到的原始文字：</div>
+                    <textarea class="ocr-text" id="ocr-text" readonly></textarea>
+                    <div class="btn-group" style="margin-top: 10px;">
+                        <button class="btn btn-secondary" onclick="editOcrText()">✏️ 编辑文字</button>
+                        <button class="btn btn-primary" onclick="parseOcrText()">🔄 解析停机记录</button>
+                    </div>
+                </div>
+                
+                <!-- 解析结果预览 -->
+                <div class="parsed-records hidden" id="parsed-records-box">
+                    <div style="margin-bottom: 10px; font-weight: 600;">✅ 解析到的停机记录（勾选要导入的）：</div>
+                    <div id="records-preview-list"></div>
+                    <div class="btn-group" style="margin-top: 15px;">
+                        <button class="btn btn-success" onclick="importSelected()">➕ 导入选中记录</button>
+                        <button class="btn btn-gray" onclick="cancelImport()">❌ 取消</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 批量粘贴 -->
             <div class="card">
                 <div class="card-title">📝 批量粘贴停机记录</div>
                 <div class="tip">
@@ -357,6 +540,7 @@
                 </div>
             </div>
             
+            <!-- 单条录入 -->
             <div class="card">
                 <div class="card-title">➕ 单条录入</div>
                 <div class="form-row">
@@ -494,12 +678,242 @@
     <script>
         // 数据存储
         let records = JSON.parse(localStorage.getItem('downtimeRecords') || '[]');
+        let parsedRecordsFromOcr = []; // 存储OCR解析的临时记录
         
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
             updateStats();
             renderRecords();
+            setupDragDrop();
         });
+        
+        // 设置拖拽上传
+        function setupDragDrop() {
+            const uploadArea = document.getElementById('upload-area');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    processImage(files[0]);
+                }
+            });
+        }
+        
+        // 文件选择处理
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                processImage(file);
+            }
+        }
+        
+        // 处理图片并进行OCR
+        async function processImage(file) {
+            // 显示预览
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                document.getElementById('preview-img').src = e.target.result;
+                document.getElementById('preview-box').classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+            
+            // 显示进度
+            document.getElementById('progress-box').classList.remove('hidden');
+            document.getElementById('progress-fill').style.width = '10%';
+            document.getElementById('progress-text').textContent = '正在加载OCR引擎...';
+            
+            try {
+                // 使用 Tesseract.js 进行 OCR
+                const result = await Tesseract.recognize(
+                    file,
+                    'chi_sim+eng', // 中文简体 + 英文
+                    {
+                        logger: (m) => {
+                            console.log(m);
+                            if (m.status === 'recognizing text') {
+                                const progress = Math.round(m.progress * 100);
+                                document.getElementById('progress-fill').style.width = (10 + progress * 0.9) + '%';
+                                document.getElementById('progress-text').textContent = `正在识别文字... ${progress}%`;
+                            }
+                        }
+                    }
+                );
+                
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('progress-text').textContent = '识别完成！';
+                
+                // 显示OCR结果
+                const recognizedText = result.data.text;
+                document.getElementById('ocr-text').value = recognizedText;
+                document.getElementById('ocr-result-box').classList.remove('hidden');
+                
+                // 自动解析
+                autoParseOcrText(recognizedText);
+                
+            } catch (error) {
+                console.error('OCR错误:', error);
+                document.getElementById('progress-text').textContent = '识别失败: ' + error.message;
+                alert('OCR识别失败，请尝试手动粘贴文字');
+            }
+        }
+        
+        // 编辑OCR文字
+        function editOcrText() {
+            const textarea = document.getElementById('ocr-text');
+            textarea.readOnly = !textarea.readOnly;
+            if (!textarea.readOnly) {
+                textarea.focus();
+                textarea.style.background = '#fff';
+            } else {
+                textarea.style.background = '#fafafa';
+            }
+        }
+        
+        // 解析OCR文字按钮
+        function parseOcrText() {
+            const text = document.getElementById('ocr-text').value;
+            autoParseOcrText(text);
+        }
+        
+        // 自动解析OCR识别到的文字
+        function autoParseOcrText(text) {
+            parsedRecordsFromOcr = [];
+            
+            // 清理OCR识别中的一些常见问题
+            text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            
+            // 尝试多种分隔方式
+            let blocks = text.split(/---+|\n\s*\n/);
+            
+            // 如果没有空行分隔，尝试按日期开头分割
+            if (blocks.length === 1) {
+                // 尝试按包含"日期"或日期格式的行分割
+                const lines = text.split('\n');
+                blocks = [];
+                let currentBlock = [];
+                
+                lines.forEach((line, index) => {
+                    // 检测是否是新记录的开始（包含日期、停机台等关键字）
+                    if ((line.match(/日期|Date|停机台|Machine|机台/) || line.match(/^\d{2}[\/\-]\d{2}/)) && currentBlock.length > 0) {
+                        blocks.push(currentBlock.join('\n'));
+                        currentBlock = [];
+                    }
+                    currentBlock.push(line);
+                });
+                
+                if (currentBlock.length > 0) {
+                    blocks.push(currentBlock.join('\n'));
+                }
+            }
+            
+            // 解析每个块
+            blocks.forEach(block => {
+                const record = parseRecordBlock(block.trim());
+                if (record) {
+                    parsedRecordsFromOcr.push(record);
+                }
+            });
+            
+            // 显示解析结果预览
+            renderParsedRecordsPreview();
+        }
+        
+        // 渲染解析结果预览
+        function renderParsedRecordsPreview() {
+            const container = document.getElementById('records-preview-list');
+            
+            if (parsedRecordsFromOcr.length === 0) {
+                container.innerHTML = '<div style="color: #999; padding: 20px;">未能识别到有效的停机记录，请检查OCR结果或手动编辑后重新解析</div>';
+                document.getElementById('parsed-records-box').classList.remove('hidden');
+                return;
+            }
+            
+            container.innerHTML = parsedRecordsFromOcr.map((record, index) => {
+                const isComplete = record.date && record.machine && record.duration;
+                const statusClass = isComplete ? 'status-ok' : 'status-warn';
+                const statusText = isComplete ? '✓ 完整' : '! 需补充';
+                
+                return `
+                    <div class="record-preview">
+                        <div class="record-preview-header">
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" class="record-checkbox" data-index="${index}" checked>
+                                <span class="record-preview-title">记录 #${index + 1}</span>
+                            </label>
+                            <span class="record-preview-status ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="record-preview-fields">
+                            <span>📅 日期: ${record.date || '<span style="color:#dc3545">未识别</span>'}</span>
+                            <span>🏭 机台: ${record.machine || '<span style="color:#dc3545">未识别</span>'}</span>
+                            <span>⏱ 时长: ${record.duration ? record.duration + '分钟' : '<span style="color:#dc3545">未识别</span>'}</span>
+                            ${record.startTime ? `<span>🕐 ${record.startTime}-${record.endTime || '?'}</span>` : ''}
+                            ${record.category ? `<span>🏷 ${record.category}</span>` : ''}
+                        </div>
+                        ${record.description ? `<div style="margin-top: 8px; font-size: 12px; color: #666;">描述: ${record.description}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('parsed-records-box').classList.remove('hidden');
+        }
+        
+        // 导入选中的记录
+        function importSelected() {
+            const checkboxes = document.querySelectorAll('.record-checkbox:checked');
+            if (checkboxes.length === 0) {
+                alert('请先勾选要导入的记录');
+                return;
+            }
+            
+            let importedCount = 0;
+            checkboxes.forEach(checkbox => {
+                const index = parseInt(checkbox.dataset.index);
+                const record = parsedRecordsFromOcr[index];
+                if (record) {
+                    // 确保有ID
+                    if (!record.id) record.id = Date.now() + Math.random();
+                    records.push(record);
+                    importedCount++;
+                }
+            });
+            
+            if (importedCount > 0) {
+                saveData();
+                updateStats();
+                renderRecords();
+                alert(`✅ 成功导入 ${importedCount} 条记录`);
+                
+                // 清理界面
+                cancelImport();
+                
+                // 切换到记录列表
+                switchTab('records');
+                document.querySelectorAll('.nav-btn').forEach((btn, i) => {
+                    btn.classList.toggle('active', i === 1);
+                });
+            }
+        }
+        
+        // 取消导入
+        function cancelImport() {
+            parsedRecordsFromOcr = [];
+            document.getElementById('parsed-records-box').classList.add('hidden');
+            document.getElementById('ocr-result-box').classList.add('hidden');
+            document.getElementById('preview-box').classList.add('hidden');
+            document.getElementById('progress-box').classList.add('hidden');
+            document.getElementById('file-input').value = '';
+        }
         
         // 切换标签
         function switchTab(tab) {
@@ -537,8 +951,9 @@
                 alert(`✅ 成功解析 ${count} 条记录`);
                 document.getElementById('batch-input').value = '';
                 switchTab('records');
-                document.querySelectorAll('.nav-btn')[1].classList.add('active');
-                document.querySelectorAll('.nav-btn')[0].classList.remove('active');
+                document.querySelectorAll('.nav-btn').forEach((btn, i) => {
+                    btn.classList.toggle('active', i === 1);
+                });
             } else {
                 alert('❌ 未能解析出有效数据，请检查格式');
             }
@@ -550,22 +965,30 @@
             const lines = text.split('\n');
             
             lines.forEach(line => {
-                const match = line.match(/^\s*([^:：]+)[:：]\s*(.+)$/);
+                // 支持中英文冒号和冒号变体
+                const match = line.match(/^\s*([^:：]+)[:：\s]+(.+)$/);
                 if (match) {
                     const key = match[1].trim();
                     const value = match[2].trim();
                     
-                    if (/日期/.test(key)) record.date = value;
-                    else if (/机台/.test(key)) record.machine = value;
-                    else if (/开始/.test(key)) record.startTime = value;
-                    else if (/结束/.test(key)) record.endTime = value;
-                    else if (/时长/.test(key)) record.duration = parseDuration(value);
-                    else if (/描述/.test(key)) record.description = value;
-                    else if (/措施/.test(key)) record.action = value;
-                    else if (/分类/.test(key)) record.category = value;
-                    else if (/记录人/.test(key)) record.recorder = value;
+                    // 中文关键字匹配
+                    if (/日期|Date/i.test(key)) record.date = value;
+                    else if (/机台|停机台|Machine|设备/i.test(key)) record.machine = value;
+                    else if (/开始|Start/i.test(key)) record.startTime = value;
+                    else if (/结束|End|停止/i.test(key)) record.endTime = value;
+                    else if (/时长|Duration|时间/i.test(key)) record.duration = parseDuration(value);
+                    else if (/描述|Description|原因|故障/i.test(key)) record.description = value;
+                    else if (/措施|Action|处理|解决/i.test(key)) record.action = value;
+                    else if (/分类|Category|类型/i.test(key)) record.category = value;
+                    else if (/记录人|Recorder|操作人/i.test(key)) record.recorder = value;
                 }
             });
+            
+            // 如果没识别到日期，尝试从文本中提取日期格式
+            if (!record.date) {
+                const dateMatch = text.match(/(\d{2}[\/\-]\d{2})/);
+                if (dateMatch) record.date = dateMatch[1];
+            }
             
             // 自动计算时长
             if (!record.duration && record.startTime && record.endTime) {
@@ -582,6 +1005,7 @@
         
         // 解析时长
         function parseDuration(str) {
+            // 支持多种格式：7min、7分钟、7、7 min等
             const match = str.match(/(\d+(?:\.\d+)?)/);
             return match ? parseFloat(match[1]) : 0;
         }
@@ -604,6 +1028,7 @@
         
         // 自动分类
         function autoCategory(desc) {
+            if (!desc) return '其他';
             const d = desc.toLowerCase();
             if (d.includes('换卷') || d.includes('换带')) return '换卷类';
             if (d.includes('换料') || d.includes('换阳极')) return '换料类';
@@ -767,8 +1192,8 @@
                         <td>${avg}</td>
                         ${showPct ? `<td>
                             ${pct}%
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: ${pct}%"></div>
+                            <div class="progress-bar-chart">
+                                <div class="progress-fill-chart" style="width: ${pct}%"></div>
                             </div>
                         </td>` : ''}
                     </tr>
@@ -789,8 +1214,8 @@
                             <span class="chart-label">${key}</span>
                             <span class="chart-value">${val.count}次 · ${val.time}分钟 (${pct}%)</span>
                         </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${pct}%"></div>
+                        <div class="progress-bar-chart">
+                            <div class="progress-fill-chart" style="width: ${pct}%"></div>
                         </div>
                     </div>
                 `;
