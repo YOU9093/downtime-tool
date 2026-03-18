@@ -468,7 +468,7 @@
             <div class="card">
                 <div class="card-title">📷 截图自动识别（OCR）</div>
                 <div class="tip">
-                    <strong>💡 使用方法：</strong>直接拖拽截图到下方区域，或点击选择图片。系统会自动识别文字并提取停机记录信息。
+                    <strong>💡 使用方法：</strong>直接拖拽截图到下方区域，或点击选择图片。系统会自动识别文字，以 <code>### 停 机 统 计 ###</code> 为分隔符提取多条停机记录。
                 </div>
                 
                 <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
@@ -516,9 +516,10 @@
             <div class="card">
                 <div class="card-title">📝 批量粘贴停机记录</div>
                 <div class="tip">
-                    <strong>💡 使用说明：</strong>从微信群截图使用「提取文字」功能，复制后粘贴到下方文本框。支持多条记录，用 <code>---</code> 或空行分隔。
+                    <strong>💡 使用说明：</strong>支持两种格式：1) 以 <code>### 停 机 统 计 ###</code> 分隔的多条记录；2) 用 <code>---</code> 或空行分隔。系统会自动识别字段。
                 </div>
-                <textarea id="batch-input" placeholder="示例格式：
+                <textarea id="batch-input" placeholder="示例格式（### 分隔）：
+### 停 机 统 计 ###
 日期: 03/03
 停机台: L4
 开始时间: 21:31
@@ -529,8 +530,7 @@
 停机分类: 换卷类
 记录人: 张三
 
----
-
+### 停 机 统 计 ###
 日期: 03/03
 停机台: 5#
 ..."></textarea>
@@ -793,18 +793,28 @@
             // 清理OCR识别中的一些常见问题
             text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
             
-            // 尝试多种分隔方式
-            let blocks = text.split(/---+|\n\s*\n/);
+            // 优先使用 "### 停 机 统 计 ###" 作为分隔符（支持空格变化）
+            let blocks = [];
+            if (text.includes('###')) {
+                // 使用 ### 作为分隔符
+                blocks = text.split(/###\s*停\s*机\s*统\s*计\s*###/);
+                // 过滤掉空块
+                blocks = blocks.filter(b => b.trim().length > 0);
+            }
             
-            // 如果没有空行分隔，尝试按日期开头分割
+            // 如果没有 ### 分隔符，尝试其他方式
+            if (blocks.length === 0) {
+                blocks = text.split(/---+|\n\s*\n/);
+            }
+            
+            // 如果没有分隔，尝试按日期开头分割
             if (blocks.length === 1) {
-                // 尝试按包含"日期"或日期格式的行分割
                 const lines = text.split('\n');
                 blocks = [];
                 let currentBlock = [];
                 
                 lines.forEach((line, index) => {
-                    // 检测是否是新记录的开始（包含日期、停机台等关键字）
+                    // 检测是否是新记录的开始
                     if ((line.match(/日期|Date|停机台|Machine|机台/) || line.match(/^\d{2}[\/\-]\d{2}/)) && currentBlock.length > 0) {
                         blocks.push(currentBlock.join('\n'));
                         currentBlock = [];
@@ -933,9 +943,18 @@
                 return;
             }
             
-            const blocks = input.split(/---+|\n\s*\n/);
-            let count = 0;
+            let blocks = [];
             
+            // 优先检查 "### 停 机 统 计 ###" 分隔符
+            if (input.includes('###')) {
+                blocks = input.split(/###\s*停\s*机\s*统\s*计\s*###/);
+                blocks = blocks.filter(b => b.trim().length > 0);
+            } else {
+                // 使用传统分隔符
+                blocks = input.split(/---+|\n\s*\n/);
+            }
+            
+            let count = 0;
             blocks.forEach(block => {
                 const record = parseRecordBlock(block.trim());
                 if (record) {
