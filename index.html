@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>停机记录分析工具</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --primary: #007bff;
+            --primary-dark: #0056b3;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --gray: #6c757d;
+            --bg: #f5f7fa;
+            --card-bg: #ffffff;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            padding-bottom: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        .header p { font-size: 0.85rem; opacity: 0.9; margin-top: 5px; }
+        .container { max-width: 900px; margin: 0 auto; padding: 15px; }
+        
+        /* 导航 */
+        .nav {
+            display: flex;
+            background: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .nav-btn {
+            flex: 1;
+            padding: 15px 10px;
+            border: none;
+            background: transparent;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .nav-btn.active {
+            color: var(--primary);
+            background: rgba(0,123,255,0.08);
+        }
+        .nav-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 20%;
+            right: 20%;
+            height: 3px;
+            background: var(--primary);
+            border-radius: 3px 3px 0 0;
+        }
+        
+        /* 卡片 */
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        /* 表单元素 */
+        textarea, input, select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1.5px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+            font-family: inherit;
+        }
+        textarea:focus, input:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        textarea { min-height: 150px; resize: vertical; }
+        .form-group { margin-bottom: 12px; }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        @media (max-width: 480px) {
+            .form-row { grid-template-columns: 1fr; }
+        }
+        
+        /* 按钮 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-warning { background: var(--warning); color: #333; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-gray { background: var(--gray); color: white; }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .btn-group .btn { flex: 1; }
+        
+        /* 提示 */
+        .tip {
+            background: #e3f2fd;
+            border-left: 4px solid var(--primary);
+            padding: 12px 15px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #555;
+            margin-bottom: 15px;
+        }
+        .tip strong { color: var(--primary); }
+        
+        /* 统计卡片 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 600px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .stat-card.orange { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+        .stat-card.green { background: linear-gradient(135deg, #30cfd0 0%, #330867 100%); }
+        .stat-card.blue { background: linear-gradient(135deg, #5ee7df 0%, #b490ca 100%); }
+        .stat-value { font-size: 28px; font-weight: 700; }
+        .stat-label { font-size: 12px; opacity: 0.95; margin-top: 4px; }
+        
+        /* 记录列表 */
+        .record-list { max-height: 500px; overflow-y: auto; }
+        .record-item {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid var(--primary);
+        }
+        .record-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .record-title { font-weight: 600; font-size: 15px; }
+        .record-time {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .record-meta {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .record-desc {
+            font-size: 14px;
+            color: #333;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed #ddd;
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 5px;
+        }
+        .tag-cat { background: #e8f5e9; color: #2e7d32; }
+        .tag-action { background: #fff3e0; color: #ef6c00; }
+        
+        /* 表格 */
+        .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 12px 10px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #555;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover { background: #f8f9fa; }
+        .progress-bar {
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+        }
+        
+        /* 图表 */
+        .chart-item {
+            margin-bottom: 15px;
+        }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+        .chart-label { font-weight: 500; }
+        .chart-value { color: #666; }
+        
+        /* 空状态 */
+        .empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-icon { font-size: 48px; margin-bottom: 15px; }
+        
+        /* 隐藏 */
+        .hidden { display: none !important; }
+        
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 停机记录分析工具</h1>
+        <p>微信群停机统计 → 停机记录表 → 停机分析表</p>
+    </div>
+    
+    <div class="container">
+        <!-- 统计概览 -->
+        <div id="overview" class="hidden">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="s-count">0</div>
+                    <div class="stat-label">停机次数</div>
+                </div>
+                <div class="stat-card orange">
+                    <div class="stat-value" id="s-time">0</div>
+                    <div class="stat-label">总时长(分钟)</div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-value" id="s-avg">0</div>
+                    <div class="stat-label">平均时长</div>
+                </div>
+                <div class="stat-card blue">
+                    <div class="stat-value" id="s-machine">0</div>
+                    <div class="stat-label">涉及机台</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 导航 -->
+        <div class="nav">
+            <button class="nav-btn active" onclick="switchTab('input')">📥 数据录入</button>
+            <button class="nav-btn" onclick="switchTab('records')">📋 停机记录表</button>
+            <button class="nav-btn" onclick="switchTab('analysis')">📊 停机分析表</button>
+        </div>
+        
+        <!-- 数据录入 -->
+        <div id="tab-input" class="tab-content">
+            <div class="card">
+                <div class="card-title">📝 批量粘贴停机记录</div>
+                <div class="tip">
+                    <strong>💡 使用说明：</strong>从微信群截图使用「提取文字」功能，复制后粘贴到下方文本框。支持多条记录，用 <code>---</code> 或空行分隔。
+                </div>
+                <textarea id="batch-input" placeholder="示例格式：
+日期: 03/03
+停机台: L4
+开始时间: 21:31
+结束时间: 21:38
+停机时长: 7min
+停机描述: 阳极自动换卷失败
+处理措施: 人工换卷
+停机分类: 换卷类
+记录人: 张三
+
+---
+
+日期: 03/03
+停机台: 5#
+..."></textarea>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="parseBatch()">🔄 解析数据</button>
+                    <button class="btn btn-gray" onclick="clearBatch()">🗑️ 清空</button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">➕ 单条录入</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="in-date" placeholder="日期 (如: 03/03)">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="in-machine" placeholder="机台号 (如: L4, 5#)">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <input type="text" id="in-start" placeholder="开始时间 (如: 21:31)">
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="in-end" placeholder="结束时间 (如: 21:38)">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <input type="text" id="in-duration" placeholder="停机时长 (分钟，可选，不填会自动计算)">
+                </div>
+                <div class="form-group">
+                    <input type="text" id="in-desc" placeholder="停机描述 (如: 阳极自动换卷失败)">
+                </div>
+                <div class="form-group">
+                    <input type="text" id="in-action" placeholder="处理措施 (如: 人工换卷)">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <select id="in-category">
+                            <option value="">选择停机分类（可选）</option>
+                            <option value="换卷类">换卷类</option>
+                            <option value="换料类">换料类</option>
+                            <option value="设备故障">设备故障</option>
+                            <option value="工艺调试">工艺调试</option>
+                            <option value="物流堵料">物流堵料</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="in-recorder" placeholder="记录人">
+                    </div>
+                </div>
+                <button class="btn btn-success" onclick="addSingle()">✅ 添加记录</button>
+            </div>
+        </div>
+        
+        <!-- 停机记录表 -->
+        <div id="tab-records" class="tab-content hidden">
+            <div class="card">
+                <div class="card-title">📋 停机记录明细表（附表2/3格式）</div>
+                <div id="records-container">
+                    <div class="empty">
+                        <div class="empty-icon">📝</div>
+                        <p>暂无数据，请先录入停机记录</p>
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-top: 20px;">
+                    <button class="btn btn-primary" onclick="exportCSV('records')">📄 导出记录表CSV</button>
+                    <button class="btn btn-danger" onclick="clearAll()">🗑️ 清空所有数据</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 停机分析表 -->
+        <div id="tab-analysis" class="tab-content hidden">
+            <div class="card">
+                <div class="card-title">📊 按机台统计（附表4/5格式）</div>
+                <div class="table-wrap">
+                    <table id="tbl-machine">
+                        <thead>
+                            <tr>
+                                <th>机台</th>
+                                <th>停机次数</th>
+                                <th>累计时长(分)</th>
+                                <th>平均时长</th>
+                                <th>占比</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📊 按停机原因统计</div>
+                <div class="table-wrap">
+                    <table id="tbl-reason">
+                        <thead>
+                            <tr>
+                                <th>停机原因</th>
+                                <th>停机次数</th>
+                                <th>累计时长(分)</th>
+                                <th>平均时长</th>
+                                <th>占比</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📊 按日期统计</div>
+                <div class="table-wrap">
+                    <table id="tbl-date">
+                        <thead>
+                            <tr>
+                                <th>日期</th>
+                                <th>停机次数</th>
+                                <th>累计时长(分)</th>
+                                <th>平均时长</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📈 停机原因占比可视化</div>
+                <div id="chart-container"></div>
+            </div>
+            
+            <div class="btn-group">
+                <button class="btn btn-primary" onclick="exportCSV('analysis')">📄 导出分析表CSV</button>
+            </div>
+        </div>
+        
+        <div class="footer">
+            停机记录分析工具 | 数据仅存储在浏览器本地
+        </div>
+    </div>
+    
+    <script>
+        // 数据存储
+        let records = JSON.parse(localStorage.getItem('downtimeRecords') || '[]');
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStats();
+            renderRecords();
+        });
+        
+        // 切换标签
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById('tab-' + tab).classList.remove('hidden');
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            if (tab === 'analysis') renderAnalysis();
+        }
+        
+        // 解析批量数据
+        function parseBatch() {
+            const input = document.getElementById('batch-input').value.trim();
+            if (!input) {
+                alert('请输入数据');
+                return;
+            }
+            
+            const blocks = input.split(/---+|\n\s*\n/);
+            let count = 0;
+            
+            blocks.forEach(block => {
+                const record = parseRecordBlock(block.trim());
+                if (record) {
+                    records.push(record);
+                    count++;
+                }
+            });
+            
+            if (count > 0) {
+                saveData();
+                updateStats();
+                renderRecords();
+                alert(`✅ 成功解析 ${count} 条记录`);
+                document.getElementById('batch-input').value = '';
+                switchTab('records');
+                document.querySelectorAll('.nav-btn')[1].classList.add('active');
+                document.querySelectorAll('.nav-btn')[0].classList.remove('active');
+            } else {
+                alert('❌ 未能解析出有效数据，请检查格式');
+            }
+        }
+        
+        // 解析单条记录块
+        function parseRecordBlock(text) {
+            const record = { id: Date.now() + Math.random() };
+            const lines = text.split('\n');
+            
+            lines.forEach(line => {
+                const match = line.match(/^\s*([^:：]+)[:：]\s*(.+)$/);
+                if (match) {
+                    const key = match[1].trim();
+                    const value = match[2].trim();
+                    
+                    if (/日期/.test(key)) record.date = value;
+                    else if (/机台/.test(key)) record.machine = value;
+                    else if (/开始/.test(key)) record.startTime = value;
+                    else if (/结束/.test(key)) record.endTime = value;
+                    else if (/时长/.test(key)) record.duration = parseDuration(value);
+                    else if (/描述/.test(key)) record.description = value;
+                    else if (/措施/.test(key)) record.action = value;
+                    else if (/分类/.test(key)) record.category = value;
+                    else if (/记录人/.test(key)) record.recorder = value;
+                }
+            });
+            
+            // 自动计算时长
+            if (!record.duration && record.startTime && record.endTime) {
+                record.duration = calcDuration(record.startTime, record.endTime);
+            }
+            
+            // 自动分类
+            if (!record.category && record.description) {
+                record.category = autoCategory(record.description);
+            }
+            
+            return (record.date && record.machine) ? record : null;
+        }
+        
+        // 解析时长
+        function parseDuration(str) {
+            const match = str.match(/(\d+(?:\.\d+)?)/);
+            return match ? parseFloat(match[1]) : 0;
+        }
+        
+        // 计算时长
+        function calcDuration(start, end) {
+            const s = parseTime(start);
+            const e = parseTime(end);
+            if (s === null || e === null) return 0;
+            let diff = e - s;
+            if (diff < 0) diff += 24 * 60;
+            return diff;
+        }
+        
+        // 解析时间
+        function parseTime(time) {
+            const match = time.match(/(\d{1,2})[:：](\d{2})/);
+            return match ? parseInt(match[1]) * 60 + parseInt(match[2]) : null;
+        }
+        
+        // 自动分类
+        function autoCategory(desc) {
+            const d = desc.toLowerCase();
+            if (d.includes('换卷') || d.includes('换带')) return '换卷类';
+            if (d.includes('换料') || d.includes('换阳极')) return '换料类';
+            if (d.includes('故障') || d.includes('报警') || d.includes('卡')) return '设备故障';
+            if (d.includes('调试') || d.includes('参数')) return '工艺调试';
+            if (d.includes('堵料') || d.includes('物流')) return '物流堵料';
+            return '其他';
+        }
+        
+        // 添加单条记录
+        function addSingle() {
+            const record = {
+                id: Date.now(),
+                date: document.getElementById('in-date').value,
+                machine: document.getElementById('in-machine').value,
+                startTime: document.getElementById('in-start').value,
+                endTime: document.getElementById('in-end').value,
+                duration: parseFloat(document.getElementById('in-duration').value) || 0,
+                description: document.getElementById('in-desc').value,
+                action: document.getElementById('in-action').value,
+                category: document.getElementById('in-category').value,
+                recorder: document.getElementById('in-recorder').value
+            };
+            
+            if (!record.date || !record.machine) {
+                alert('请至少填写日期和机台号');
+                return;
+            }
+            
+            // 计算时长
+            if (!record.duration && record.startTime && record.endTime) {
+                record.duration = calcDuration(record.startTime, record.endTime);
+            }
+            
+            // 自动分类
+            if (!record.category && record.description) {
+                record.category = autoCategory(record.description);
+            }
+            
+            records.push(record);
+            saveData();
+            updateStats();
+            renderRecords();
+            
+            // 清空表单
+            document.querySelectorAll('#in-date, #in-machine, #in-start, #in-end, #in-duration, #in-desc, #in-action, #in-recorder').forEach(el => el.value = '');
+            document.getElementById('in-category').value = '';
+            
+            alert('✅ 添加成功');
+        }
+        
+        // 保存数据
+        function saveData() {
+            localStorage.setItem('downtimeRecords', JSON.stringify(records));
+        }
+        
+        // 更新统计
+        function updateStats() {
+            const count = records.length;
+            const totalTime = records.reduce((sum, r) => sum + (r.duration || 0), 0);
+            const avgTime = count > 0 ? (totalTime / count).toFixed(1) : 0;
+            const machines = new Set(records.map(r => r.machine)).size;
+            
+            document.getElementById('s-count').textContent = count;
+            document.getElementById('s-time').textContent = totalTime;
+            document.getElementById('s-avg').textContent = avgTime;
+            document.getElementById('s-machine').textContent = machines;
+            
+            document.getElementById('overview').classList.toggle('hidden', count === 0);
+        }
+        
+        // 渲染记录列表
+        function renderRecords() {
+            const container = document.getElementById('records-container');
+            if (records.length === 0) {
+                container.innerHTML = `
+                    <div class="empty">
+                        <div class="empty-icon">📝</div>
+                        <p>暂无数据，请先录入停机记录</p>
+                    </div>`;
+                return;
+            }
+            
+            const sorted = [...records].sort((a, b) => {
+                if (a.date !== b.date) return b.date.localeCompare(a.date);
+                return (b.startTime || '').localeCompare(a.startTime || '');
+            });
+            
+            container.innerHTML = '<div class="record-list">' + sorted.map(r => `
+                <div class="record-item">
+                    <div class="record-header">
+                        <span class="record-title">${r.date} &nbsp; ${r.machine}</span>
+                        <span class="record-time">${r.duration || 0} min</span>
+                    </div>
+                    <div class="record-meta">
+                        <span class="tag tag-cat">${r.category || '未分类'}</span>
+                        ${r.startTime ? `<span style="color:#999">⏱ ${r.startTime} - ${r.endTime || '?'}</span>` : ''}
+                        ${r.recorder ? `<span style="color:#999;margin-left:10px">👤 ${r.recorder}</span>` : ''}
+                    </div>
+                    <div class="record-desc">
+                        <strong>描述：</strong>${r.description || '无'}<br>
+                        ${r.action ? `<span style="color:#666"><strong>措施：</strong>${r.action}</span>` : ''}
+                    </div>
+                </div>
+            `).join('') + '</div>';
+        }
+        
+        // 渲染分析
+        function renderAnalysis() {
+            if (records.length === 0) return;
+            
+            const machineStat = {}, reasonStat = {}, dateStat = {};
+            let totalTime = 0;
+            
+            records.forEach(r => {
+                const dur = r.duration || 0;
+                totalTime += dur;
+                
+                // 机台统计
+                const m = r.machine || '未知';
+                if (!machineStat[m]) machineStat[m] = { count: 0, time: 0 };
+                machineStat[m].count++;
+                machineStat[m].time += dur;
+                
+                // 原因统计
+                const c = r.category || '未分类';
+                if (!reasonStat[c]) reasonStat[c] = { count: 0, time: 0 };
+                reasonStat[c].count++;
+                reasonStat[c].time += dur;
+                
+                // 日期统计
+                const d = r.date || '未知';
+                if (!dateStat[d]) dateStat[d] = { count: 0, time: 0 };
+                dateStat[d].count++;
+                dateStat[d].time += dur;
+            });
+            
+            // 渲染机台表
+            renderTable('tbl-machine', machineStat, totalTime, true);
+            // 渲染原因表
+            renderTable('tbl-reason', reasonStat, totalTime, true);
+            // 渲染日期表
+            renderTable('tbl-date', dateStat, totalTime, false);
+            // 渲染图表
+            renderChart(reasonStat, totalTime);
+        }
+        
+        // 渲染表格
+        function renderTable(tableId, data, total, showPct) {
+            const tbody = document.querySelector(`#${tableId} tbody`);
+            const sorted = Object.entries(data).sort((a, b) => b[1].time - a[1].time);
+            
+            tbody.innerHTML = sorted.map(([key, val]) => {
+                const avg = (val.time / val.count).toFixed(1);
+                const pct = total > 0 ? ((val.time / total) * 100).toFixed(1) : 0;
+                return `
+                    <tr>
+                        <td><strong>${key}</strong></td>
+                        <td>${val.count}</td>
+                        <td>${val.time}</td>
+                        <td>${avg}</td>
+                        ${showPct ? `<td>
+                            ${pct}%
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${pct}%"></div>
+                            </div>
+                        </td>` : ''}
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        // 渲染图表
+        function renderChart(data, total) {
+            const container = document.getElementById('chart-container');
+            const sorted = Object.entries(data).sort((a, b) => b[1].time - a[1].time);
+            
+            container.innerHTML = sorted.map(([key, val]) => {
+                const pct = total > 0 ? ((val.time / total) * 100).toFixed(1) : 0;
+                return `
+                    <div class="chart-item">
+                        <div class="chart-header">
+                            <span class="chart-label">${key}</span>
+                            <span class="chart-value">${val.count}次 · ${val.time}分钟 (${pct}%)</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // 清空批量输入
+        function clearBatch() {
+            document.getElementById('batch-input').value = '';
+        }
+        
+        // 清空所有数据
+        function clearAll() {
+            if (!confirm('⚠️ 确定要清空所有数据吗？此操作不可恢复！')) return;
+            records = [];
+            saveData();
+            updateStats();
+            renderRecords();
+            alert('✅ 数据已清空');
+        }
+        
+        // 导出CSV
+        function exportCSV(type) {
+            if (records.length === 0) {
+                alert('没有数据可导出');
+                return;
+            }
+            
+            let csv = '\uFEFF';
+            const filename = `停机${type === 'records' ? '记录' : '分析'}_${new Date().toLocaleDateString()}.csv`;
+            
+            if (type === 'records') {
+                csv += '日期,机台,开始时间,结束时间,停机时长(分钟),停机描述,处理措施,停机分类,记录人\n';
+                records.forEach(r => {
+                    csv += `${r.date},${r.machine},${r.startTime || ''},${r.endTime || ''},${r.duration || 0},"${r.description || ''}","${r.action || ''}",${r.category || ''},${r.recorder || ''}\n`;
+                });
+            } else {
+                csv += '统计维度,项目,停机次数,累计时长(分钟),平均时长(分钟),占比(%)\n';
+                
+                // 机台统计
+                const mstat = {};
+                records.forEach(r => {
+                    const m = r.machine || '未知';
+                    if (!mstat[m]) mstat[m] = { count: 0, time: 0 };
+                    mstat[m].count++;
+                    mstat[m].time += r.duration || 0;
+                });
+                const total = records.reduce((s, r) => s + (r.duration || 0), 0);
+                Object.entries(mstat).forEach(([k, v]) => {
+                    csv += `按机台,${k},${v.count},${v.time},${(v.time/v.count).toFixed(1)},${total>0?((v.time/total)*100).toFixed(1):0}\n`;
+                });
+                
+                // 原因统计
+                const rstat = {};
+                records.forEach(r => {
+                    const c = r.category || '未分类';
+                    if (!rstat[c]) rstat[c] = { count: 0, time: 0 };
+                    rstat[c].count++;
+                    rstat[c].time += r.duration || 0;
+                });
+                Object.entries(rstat).forEach(([k, v]) => {
+                    csv += `按原因,${k},${v.count},${v.time},${(v.time/v.count).toFixed(1)},${total>0?((v.time/total)*100).toFixed(1):0}\n`;
+                });
+            }
+            
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+        }
+    </script>
+</body>
+</html>
