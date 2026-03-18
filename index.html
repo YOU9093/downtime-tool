@@ -944,42 +944,59 @@
         function aggressiveParse(text) {
             const records = [];
             
-            // 按 ### 停 机 统 计 ### 分割
-            let blocks = text.split(/###\s*停\s*机\s*统\s*计\s*###/);
-            blocks = blocks.filter(b => b.trim().length > 10); // 过滤太短的块
+            // 第一步: 激进清理
+            let cleaned = text
+                .replace(/[;@|<>,."「」]/g, ' ')     // 特殊符号换空格
+                .replace(/[※%Xx]/g, '')              // 移除OCR乱码
+                .replace(/\s+/g, ' ')                // 合并所有空格
+                .trim();
+            
+            // 第二步: 按 ### 停 机 统 计 ### 分割
+            let blocks = cleaned.split(/###\s*停\s*机\s*统\s*计\s*###/);
+            
+            // 过滤太短的块，并清理每个块
+            blocks = blocks.map(b => b.trim()).filter(b => b.length > 20);
             
             blocks.forEach((block, idx) => {
                 const record = { id: Date.now() + idx };
                 
-                // 清理文本
-                block = cleanOcrText(block);
+                // 第三步: 提取字段（处理字段名中的空格）
                 
-                // 提取日期 - 匹配 03/02, 03-02 等格式
+                // 日期 - 匹配 03/02, 03-02
                 const dateMatch = block.match(/(\d{2}[\/\-]\d{2})/);
                 if (dateMatch) record.date = dateMatch[1];
                 
-                // 提取拉线 - 匹配 拉线:L4, 拉线 L4 等
-                const lineMatch = block.match(/拉线[:\s]*([A-Z]\d+)/i);
+                // 拉线 - 匹配 拉线:L4, 拉线 L4
+                const lineMatch = block.match(/拉\s*线[:\s]*([A-Z]\d+)/i);
                 if (lineMatch) record.line = lineMatch[1];
                 
-                // 提取机台 - 匹配多种格式
-                // 停机机台:5#, 机台:5#, 5# 等
-                const machineMatch = block.match(/(?:停机)?机台[:\s]*(\d+#?)/) || 
-                                     block.match(/机司[:\s]*(\d+#?)/) ||
-                                     block.match(/停[^\n]*机台[:\s]*(\d+#?)/);
+                // 机台 - 处理 "停 机 机 台" 这种带空格的情况
+                // 先把 "停 机 机 台" 替换成 "停机机台" 再匹配
+                let normalizedBlock = block
+                    .replace(/停\s*机\s*机\s*台/g, '停机机台')
+                    .replace(/停\s*机\s*时\s*长/g, '停机时长')
+                    .replace(/停\s*机\s*描\s*述/g, '停机描述')
+                    .replace(/停\s*机\s*原\s*因/g, '停机原因')
+                    .replace(/停\s*机\s*分\s*类/g, '停机分类')
+                    .replace(/处\s*理\s*措\s*施/g, '处理措施')
+                    .replace(/记\s*录\s*人/g, '记录人')
+                    .replace(/开\s*始\s*时\s*间/g, '开始时间')
+                    .replace(/结\s*束\s*时\s*间/g, '结束时间')
+                    .replace(/机\s*司/g, '机台');
+                
+                const machineMatch = normalizedBlock.match(/(?:停机)?机台[:\s]*(\d+#?)/);
                 if (machineMatch) record.machine = machineMatch[1];
                 
-                // 提取时间 - 匹配 21:31, 21：31, 21 31 等
-                const timeMatches = block.matchAll(/(\d{1,2})[:：\s](\d{2})/g);
-                const times = [...timeMatches];
-                if (times.length >= 2) {
-                    record.startTime = times[0][1] + ':' + times[0][2];
-                    record.endTime = times[1][1] + ':' + times[1][2];
+                // 时间 - 找所有 HH:MM 格式
+                const timeMatches = [...normalizedBlock.matchAll(/(\d{1,2}):(\d{2})/g)];
+                if (timeMatches.length >= 2) {
+                    record.startTime = timeMatches[0][1] + ':' + timeMatches[0][2];
+                    record.endTime = timeMatches[1][1] + ':' + timeMatches[1][2];
                 }
                 
-                // 提取时长 - 匹配 数字+min/分钟 或纯数字
-                const durationMatch = block.match(/(?:时长|时间)[:\s]*(\d+)/) ||
-                                     block.match(/(\d+)\s*(?:min|分钟)/i);
+                // 时长
+                const durationMatch = normalizedBlock.match(/(?:停机)?时长[:\s]*(\d+)/) ||
+                                     normalizedBlock.match(/(\d+)\s*(?:min|分钟)/i);
                 if (durationMatch) {
                     record.duration = parseInt(durationMatch[1]);
                 }
@@ -989,36 +1006,40 @@
                     record.duration = calcDuration(record.startTime, record.endTime);
                 }
                 
-                // 提取描述 - 在"停机描述"之后到"停机原因"之前
-                const descMatch = block.match(/(?:停机)?描述[:\s]*([^原因]+?)(?:停机原因|$)/);
+                // 描述 - 在"描述"之后到"原因"或"分类"之前
+                const descMatch = normalizedBlock.match(/(?:停机)?描述[:\s]*([^原因分类]+?)(?:停机原因|停机分类|处理措施|$)/);
                 if (descMatch) record.description = descMatch[1].trim();
                 
-                // 提取原因
-                const reasonMatch = block.match(/(?:停机)?原因[:\s]*([^处理]+?)(?:处理措施|$)/);
+                // 原因
+                const reasonMatch = normalizedBlock.match(/(?:停机)?原因[:\s]*([^处理分类]+?)(?:处理措施|停机分类|$)/);
                 if (reasonMatch) {
                     record.reason = reasonMatch[1].trim();
+                }
+                
+                // 合并描述和原因
+                if (record.reason) {
                     if (record.description) {
-                        record.description += '（原因：' + record.reason + '）';
+                        record.description = record.description + '（原因：' + record.reason + '）';
                     } else {
                         record.description = record.reason;
                     }
                 }
                 
-                // 提取措施
-                const actionMatch = block.match(/(?:处理)?措施[:\s]*([^分记]+?)(?:停机分类|记录人|$)/);
+                // 措施
+                const actionMatch = normalizedBlock.match(/(?:处理)?措施[:\s]*([^分类记录]+?)(?:停机分类|记录人|$)/);
                 if (actionMatch) record.action = actionMatch[1].trim();
                 
-                // 提取分类
-                const catMatch = block.match(/(?:停机)?分类[:\s]*(\S+)/);
+                // 分类
+                const catMatch = normalizedBlock.match(/(?:停机)?分类[:\s]*(\S+)/);
                 if (catMatch) {
                     record.category = catMatch[1].trim();
                 } else if (record.description) {
                     record.category = autoCategory(record.description);
                 }
                 
-                // 提取记录人
-                const recorderMatch = block.match(/(?:记录人|记承人)[:\s]*([^\d]+?)(?:\d|$)/);
-                if (recorderMatch) record.recorder = recorderMatch[1].trim().slice(0, 10);
+                // 记录人 - 匹配中文字符
+                const recorderMatch = normalizedBlock.match(/记录人[:\s]*([\u4e00-\u9fa5]+)/);
+                if (recorderMatch) record.recorder = recorderMatch[1].trim().slice(0, 4);
                 
                 // 只保留有日期和机台的记录
                 if (record.date && record.machine) {
