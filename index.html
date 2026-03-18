@@ -7,6 +7,8 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <!-- Tesseract.js OCR -->
     <script src='https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js'></script>
+    <!-- SheetJS for Excel export -->
+    <script src='https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js'></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -599,7 +601,7 @@
                     </div>
                 </div>
                 <div class="btn-group" style="margin-top: 20px;">
-                    <button class="btn btn-primary" onclick="exportCSV('records')">📄 导出记录表CSV</button>
+                    <button class="btn btn-primary" onclick="exportExcel('records')">📊 导出Excel记录表</button>
                     <button class="btn btn-danger" onclick="clearAll()">🗑️ 清空所有数据</button>
                 </div>
             </div>
@@ -666,7 +668,7 @@
             </div>
             
             <div class="btn-group">
-                <button class="btn btn-primary" onclick="exportCSV('analysis')">📄 导出分析表CSV</button>
+                <button class="btn btn-primary" onclick="exportExcel('analysis')">📊 导出Excel分析表</button>
             </div>
         </div>
         
@@ -788,52 +790,8 @@
         
         // 自动解析OCR识别到的文字
         function autoParseOcrText(text) {
-            parsedRecordsFromOcr = [];
-            
-            // 清理OCR识别中的一些常见问题
-            text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-            
-            // 优先使用 "### 停 机 统 计 ###" 作为分隔符（支持空格变化）
-            let blocks = [];
-            if (text.includes('###')) {
-                // 使用 ### 作为分隔符
-                blocks = text.split(/###\s*停\s*机\s*统\s*计\s*###/);
-                // 过滤掉空块
-                blocks = blocks.filter(b => b.trim().length > 0);
-            }
-            
-            // 如果没有 ### 分隔符，尝试其他方式
-            if (blocks.length === 0) {
-                blocks = text.split(/---+|\n\s*\n/);
-            }
-            
-            // 如果没有分隔，尝试按日期开头分割
-            if (blocks.length === 1) {
-                const lines = text.split('\n');
-                blocks = [];
-                let currentBlock = [];
-                
-                lines.forEach((line, index) => {
-                    // 检测是否是新记录的开始
-                    if ((line.match(/日期|Date|停机台|Machine|机台/) || line.match(/^\d{2}[\/\-]\d{2}/)) && currentBlock.length > 0) {
-                        blocks.push(currentBlock.join('\n'));
-                        currentBlock = [];
-                    }
-                    currentBlock.push(line);
-                });
-                
-                if (currentBlock.length > 0) {
-                    blocks.push(currentBlock.join('\n'));
-                }
-            }
-            
-            // 解析每个块
-            blocks.forEach(block => {
-                const record = parseRecordBlock(block.trim());
-                if (record) {
-                    parsedRecordsFromOcr.push(record);
-                }
-            });
+            // 使用强力解析
+            parsedRecordsFromOcr = aggressiveParse(text);
             
             // 显示解析结果预览
             renderParsedRecordsPreview();
@@ -943,31 +901,15 @@
                 return;
             }
             
-            let blocks = [];
+            // 使用强力解析
+            const newRecords = aggressiveParse(input);
             
-            // 优先检查 "### 停 机 统 计 ###" 分隔符
-            if (input.includes('###')) {
-                blocks = input.split(/###\s*停\s*机\s*统\s*计\s*###/);
-                blocks = blocks.filter(b => b.trim().length > 0);
-            } else {
-                // 使用传统分隔符
-                blocks = input.split(/---+|\n\s*\n/);
-            }
-            
-            let count = 0;
-            blocks.forEach(block => {
-                const record = parseRecordBlock(block.trim());
-                if (record) {
-                    records.push(record);
-                    count++;
-                }
-            });
-            
-            if (count > 0) {
+            if (newRecords.length > 0) {
+                records = records.concat(newRecords);
                 saveData();
                 updateStats();
                 renderRecords();
-                alert(`✅ 成功解析 ${count} 条记录`);
+                alert(`✅ 成功解析 ${newRecords.length} 条记录`);
                 document.getElementById('batch-input').value = '';
                 switchTab('records');
                 document.querySelectorAll('.nav-btn').forEach((btn, i) => {
@@ -978,14 +920,113 @@
             }
         }
         
-        // 清理OCR乱码
+        // 清理OCR乱码（更激进的清理）
         function cleanOcrText(text) {
+            if (!text) return '';
             return text
-                .replace(/[※%Xx""「」]/g, '')  // 移除常见OCR乱码符号
-                .replace(/机司/g, '机台')        // 修正常见识别错误
-                .replace(/:\s*/g, ':')          // 规范化冒号
-                .replace(/\s+/g, ' ')           // 合并多余空格
+                .replace(/[※%Xx""「」]/g, '')           // 移除常见OCR乱码符号
+                .replace(/机司/g, '机台')                // 修正常见识别错误
+                .replace(/结东/g, '结束')                // 修正结束
+                .replace(/时氏/g, '时长')                // 修正时长
+                .replace(/描迷/g, '描述')                // 修正描述
+                .replace(/原困/g, '原因')                // 修正原因
+                .replace(/记承人/g, '记录人')            // 修正记录人
+                .replace(/:\s*/g, ':')                  // 规范化冒号
+                .replace(/[\s]+/g, ' ')                 // 合并多余空格
+                .replace(/开 始/g, '开始')               // 修正空格
+                .replace(/结 束/g, '结束')
+                .replace(/停 机/g, '停机')
+                .replace(/时 长/g, '时长')
                 .trim();
+        }
+        
+        // 强力解析OCR文本（处理极端混乱的数据）
+        function aggressiveParse(text) {
+            const records = [];
+            
+            // 按 ### 停 机 统 计 ### 分割
+            let blocks = text.split(/###\s*停\s*机\s*统\s*计\s*###/);
+            blocks = blocks.filter(b => b.trim().length > 10); // 过滤太短的块
+            
+            blocks.forEach((block, idx) => {
+                const record = { id: Date.now() + idx };
+                
+                // 清理文本
+                block = cleanOcrText(block);
+                
+                // 提取日期 - 匹配 03/02, 03-02 等格式
+                const dateMatch = block.match(/(\d{2}[\/\-]\d{2})/);
+                if (dateMatch) record.date = dateMatch[1];
+                
+                // 提取拉线 - 匹配 拉线:L4, 拉线 L4 等
+                const lineMatch = block.match(/拉线[:\s]*([A-Z]\d+)/i);
+                if (lineMatch) record.line = lineMatch[1];
+                
+                // 提取机台 - 匹配多种格式
+                // 停机机台:5#, 机台:5#, 5# 等
+                const machineMatch = block.match(/(?:停机)?机台[:\s]*(\d+#?)/) || 
+                                     block.match(/机司[:\s]*(\d+#?)/) ||
+                                     block.match(/停[^\n]*机台[:\s]*(\d+#?)/);
+                if (machineMatch) record.machine = machineMatch[1];
+                
+                // 提取时间 - 匹配 21:31, 21：31, 21 31 等
+                const timeMatches = block.matchAll(/(\d{1,2})[:：\s](\d{2})/g);
+                const times = [...timeMatches];
+                if (times.length >= 2) {
+                    record.startTime = times[0][1] + ':' + times[0][2];
+                    record.endTime = times[1][1] + ':' + times[1][2];
+                }
+                
+                // 提取时长 - 匹配 数字+min/分钟 或纯数字
+                const durationMatch = block.match(/(?:时长|时间)[:\s]*(\d+)/) ||
+                                     block.match(/(\d+)\s*(?:min|分钟)/i);
+                if (durationMatch) {
+                    record.duration = parseInt(durationMatch[1]);
+                }
+                
+                // 如果没提取到时长但有时间，计算时长
+                if (!record.duration && record.startTime && record.endTime) {
+                    record.duration = calcDuration(record.startTime, record.endTime);
+                }
+                
+                // 提取描述 - 在"停机描述"之后到"停机原因"之前
+                const descMatch = block.match(/(?:停机)?描述[:\s]*([^原因]+?)(?:停机原因|$)/);
+                if (descMatch) record.description = descMatch[1].trim();
+                
+                // 提取原因
+                const reasonMatch = block.match(/(?:停机)?原因[:\s]*([^处理]+?)(?:处理措施|$)/);
+                if (reasonMatch) {
+                    record.reason = reasonMatch[1].trim();
+                    if (record.description) {
+                        record.description += '（原因：' + record.reason + '）';
+                    } else {
+                        record.description = record.reason;
+                    }
+                }
+                
+                // 提取措施
+                const actionMatch = block.match(/(?:处理)?措施[:\s]*([^分记]+?)(?:停机分类|记录人|$)/);
+                if (actionMatch) record.action = actionMatch[1].trim();
+                
+                // 提取分类
+                const catMatch = block.match(/(?:停机)?分类[:\s]*(\S+)/);
+                if (catMatch) {
+                    record.category = catMatch[1].trim();
+                } else if (record.description) {
+                    record.category = autoCategory(record.description);
+                }
+                
+                // 提取记录人
+                const recorderMatch = block.match(/(?:记录人|记承人)[:\s]*([^\d]+?)(?:\d|$)/);
+                if (recorderMatch) record.recorder = recorderMatch[1].trim().slice(0, 10);
+                
+                // 只保留有日期和机台的记录
+                if (record.date && record.machine) {
+                    records.push(record);
+                }
+            });
+            
+            return records;
         }
         
         // 解析单条记录块
@@ -1331,55 +1372,101 @@
             alert('✅ 数据已清空');
         }
         
-        // 导出CSV
-        function exportCSV(type) {
+        // 导出Excel
+        function exportExcel(type) {
             if (records.length === 0) {
                 alert('没有数据可导出');
                 return;
             }
             
-            let csv = '\uFEFF';
-            const filename = `停机${type === 'records' ? '记录' : '分析'}_${new Date().toLocaleDateString()}.csv`;
+            const filename = `停机${type === 'records' ? '记录' : '分析'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.xlsx`;
             
             if (type === 'records') {
-                csv += '日期,拉线,机台,开始时间,结束时间,停机时长(分钟),停机描述,处理措施,停机分类,记录人\n';
-                records.forEach(r => {
-                    csv += `${r.date || ''},${r.line || ''},${r.machine || ''},${r.startTime || ''},${r.endTime || ''},${r.duration || 0},"${r.description || ''}","${r.action || ''}",${r.category || ''},${r.recorder || ''}\n`;
-                });
-            } else {
-                csv += '统计维度,项目,停机次数,累计时长(分钟),平均时长(分钟),占比(%)\n';
+                // 记录表数据
+                const data = records.map(r => ({
+                    '日期': r.date || '',
+                    '拉线': r.line || '',
+                    '机台': r.machine || '',
+                    '开始时间': r.startTime || '',
+                    '结束时间': r.endTime || '',
+                    '停机时长(分钟)': r.duration || 0,
+                    '停机描述': r.description || '',
+                    '处理措施': r.action || '',
+                    '停机分类': r.category || '',
+                    '记录人': r.recorder || ''
+                }));
                 
-                // 机台统计
-                const mstat = {};
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, '停机记录');
+                XLSX.writeFile(wb, filename);
+                
+            } else {
+                // 分析表数据 - 创建多个sheet
+                const wb = XLSX.utils.book_new();
+                
+                // 按机台统计
+                const machineStat = {};
                 records.forEach(r => {
                     const m = r.machine || '未知';
-                    if (!mstat[m]) mstat[m] = { count: 0, time: 0 };
-                    mstat[m].count++;
-                    mstat[m].time += r.duration || 0;
+                    if (!machineStat[m]) machineStat[m] = { count: 0, time: 0 };
+                    machineStat[m].count++;
+                    machineStat[m].time += r.duration || 0;
                 });
-                const total = records.reduce((s, r) => s + (r.duration || 0), 0);
-                Object.entries(mstat).forEach(([k, v]) => {
-                    csv += `按机台,${k},${v.count},${v.time},${(v.time/v.count).toFixed(1)},${total>0?((v.time/total)*100).toFixed(1):0}\n`;
-                });
+                const totalTime = records.reduce((s, r) => s + (r.duration || 0), 0);
                 
-                // 原因统计
-                const rstat = {};
+                const machineData = Object.entries(machineStat).map(([k, v]) => ({
+                    '机台': k,
+                    '停机次数': v.count,
+                    '累计时长(分钟)': v.time,
+                    '平均时长(分钟)': (v.time / v.count).toFixed(1),
+                    '占比(%)': totalTime > 0 ? ((v.time / totalTime) * 100).toFixed(1) : 0
+                })).sort((a, b) => b['累计时长(分钟)'] - a['累计时长(分钟)']);
+                
+                const ws1 = XLSX.utils.json_to_sheet(machineData);
+                XLSX.utils.book_append_sheet(wb, ws1, '按机台统计');
+                
+                // 按原因统计
+                const reasonStat = {};
                 records.forEach(r => {
                     const c = r.category || '未分类';
-                    if (!rstat[c]) rstat[c] = { count: 0, time: 0 };
-                    rstat[c].count++;
-                    rstat[c].time += r.duration || 0;
+                    if (!reasonStat[c]) reasonStat[c] = { count: 0, time: 0 };
+                    reasonStat[c].count++;
+                    reasonStat[c].time += r.duration || 0;
                 });
-                Object.entries(rstat).forEach(([k, v]) => {
-                    csv += `按原因,${k},${v.count},${v.time},${(v.time/v.count).toFixed(1)},${total>0?((v.time/total)*100).toFixed(1):0}\n`;
+                
+                const reasonData = Object.entries(reasonStat).map(([k, v]) => ({
+                    '停机原因': k,
+                    '停机次数': v.count,
+                    '累计时长(分钟)': v.time,
+                    '平均时长(分钟)': (v.time / v.count).toFixed(1),
+                    '占比(%)': totalTime > 0 ? ((v.time / totalTime) * 100).toFixed(1) : 0
+                })).sort((a, b) => b['累计时长(分钟)'] - a['累计时长(分钟)']);
+                
+                const ws2 = XLSX.utils.json_to_sheet(reasonData);
+                XLSX.utils.book_append_sheet(wb, ws2, '按原因统计');
+                
+                // 按日期统计
+                const dateStat = {};
+                records.forEach(r => {
+                    const d = r.date || '未知';
+                    if (!dateStat[d]) dateStat[d] = { count: 0, time: 0 };
+                    dateStat[d].count++;
+                    dateStat[d].time += r.duration || 0;
                 });
+                
+                const dateData = Object.entries(dateStat).map(([k, v]) => ({
+                    '日期': k,
+                    '停机次数': v.count,
+                    '累计时长(分钟)': v.time,
+                    '平均时长(分钟)': (v.time / v.count).toFixed(1)
+                })).sort((a, b) => a['日期'].localeCompare(b['日期']));
+                
+                const ws3 = XLSX.utils.json_to_sheet(dateData);
+                XLSX.utils.book_append_sheet(wb, ws3, '按日期统计');
+                
+                XLSX.writeFile(wb, filename);
             }
-            
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            link.click();
         }
     </script>
 </body>
