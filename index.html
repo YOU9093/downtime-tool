@@ -978,28 +978,46 @@
             }
         }
         
+        // 清理OCR乱码
+        function cleanOcrText(text) {
+            return text
+                .replace(/[※%Xx""「」]/g, '')  // 移除常见OCR乱码符号
+                .replace(/机司/g, '机台')        // 修正常见识别错误
+                .replace(/:\s*/g, ':')          // 规范化冒号
+                .replace(/\s+/g, ' ')           // 合并多余空格
+                .trim();
+        }
+        
         // 解析单条记录块
         function parseRecordBlock(text) {
             const record = { id: Date.now() + Math.random() };
             const lines = text.split('\n');
             
             lines.forEach(line => {
-                // 支持中英文冒号和冒号变体
+                // 清理乱码
+                line = cleanOcrText(line);
+                
+                // 支持中英文冒号和冒号变体，以及OCR后可能的格式
                 const match = line.match(/^\s*([^:：]+)[:：\s]+(.+)$/);
                 if (match) {
-                    const key = match[1].trim();
-                    const value = match[2].trim();
+                    let key = match[1].trim();
+                    let value = match[2].trim();
                     
-                    // 中文关键字匹配
+                    // 移除字段名中的乱码字符
+                    key = key.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+                    
+                    // 中文关键字匹配（支持OCR错误变体）
                     if (/日期|Date/i.test(key)) record.date = value;
-                    else if (/机台|停机台|Machine|设备/i.test(key)) record.machine = value;
+                    else if (/拉线|Line/i.test(key)) record.line = value;
+                    else if (/机台|停机台|Machine|设备|机司/i.test(key)) record.machine = value;
                     else if (/开始|Start/i.test(key)) record.startTime = value;
-                    else if (/结束|End|停止/i.test(key)) record.endTime = value;
-                    else if (/时长|Duration|时间/i.test(key)) record.duration = parseDuration(value);
-                    else if (/描述|Description|原因|故障/i.test(key)) record.description = value;
+                    else if (/结束|End|停止|结东/i.test(key)) record.endTime = value;
+                    else if (/时长|Duration|时间|时氏/i.test(key)) record.duration = parseDuration(value);
+                    else if (/描述|Description|描迷/i.test(key)) record.description = value;
+                    else if (/原因|Reason|原困/i.test(key)) record.reason = value;
                     else if (/措施|Action|处理|解决/i.test(key)) record.action = value;
                     else if (/分类|Category|类型/i.test(key)) record.category = value;
-                    else if (/记录人|Recorder|操作人/i.test(key)) record.recorder = value;
+                    else if (/记录人|Recorder|操作人|记承人/i.test(key)) record.recorder = value;
                 }
             });
             
@@ -1009,9 +1027,22 @@
                 if (dateMatch) record.date = dateMatch[1];
             }
             
+            // 如果没识别到机台，尝试匹配 #号结尾的数字
+            if (!record.machine) {
+                const machineMatch = text.match(/(\d+#?)/);
+                if (machineMatch) record.machine = machineMatch[1];
+            }
+            
             // 自动计算时长
             if (!record.duration && record.startTime && record.endTime) {
                 record.duration = calcDuration(record.startTime, record.endTime);
+            }
+            
+            // 合并描述和原因
+            if (record.reason && !record.description) {
+                record.description = record.reason;
+            } else if (record.reason && record.description) {
+                record.description = record.description + '（原因：' + record.reason + '）';
             }
             
             // 自动分类
@@ -1024,36 +1055,79 @@
         
         // 解析时长
         function parseDuration(str) {
-            // 支持多种格式：7min、7分钟、7、7 min等
-            const match = str.match(/(\d+(?:\.\d+)?)/);
-            return match ? parseFloat(match[1]) : 0;
+            if (!str) return 0;
+            // 支持多种格式：7min、7分钟、7、7 min、min7等
+            str = str.toString().replace(/min|分钟|min/gi, '').trim();
+            const match = str.match(/(\d+)/);
+            return match ? parseInt(match[1]) : 0;
         }
         
         // 计算时长
         function calcDuration(start, end) {
+            if (!start || !end) return 0;
+            
+            // 清理时间字符串
+            start = start.toString().replace(/[:：\s]/g, ':').trim();
+            end = end.toString().replace(/[:：\s]/g, ':').trim();
+            
             const s = parseTime(start);
             const e = parseTime(end);
             if (s === null || e === null) return 0;
+            
             let diff = e - s;
+            // 跨天处理（如 23:30 到 00:15）
             if (diff < 0) diff += 24 * 60;
             return diff;
         }
         
         // 解析时间
         function parseTime(time) {
-            const match = time.match(/(\d{1,2})[:：](\d{2})/);
-            return match ? parseInt(match[1]) * 60 + parseInt(match[2]) : null;
+            // 支持多种格式：21:31、21：31、2131、21.31等
+            time = time.toString().trim();
+            
+            // 尝试匹配 HH:MM 格式
+            let match = time.match(/(\d{1,2}):(\d{2})/);
+            if (match) {
+                return parseInt(match[1]) * 60 + parseInt(match[2]);
+            }
+            
+            // 尝试匹配 HHMM 格式（4位数字）
+            match = time.match(/^(\d{1,2})(\d{2})$/);
+            if (match) {
+                const h = parseInt(match[1]);
+                const m = parseInt(match[2]);
+                if (m < 60) return h * 60 + m;
+            }
+            
+            // 尝试匹配纯小时
+            match = time.match(/^(\d{1,2})$/);
+            if (match) {
+                return parseInt(match[1]) * 60;
+            }
+            
+            return null;
         }
         
         // 自动分类
         function autoCategory(desc) {
             if (!desc) return '其他';
             const d = desc.toLowerCase();
-            if (d.includes('换卷') || d.includes('换带')) return '换卷类';
-            if (d.includes('换料') || d.includes('换阳极')) return '换料类';
-            if (d.includes('故障') || d.includes('报警') || d.includes('卡')) return '设备故障';
+            
+            // 换卷类
+            if (d.includes('换卷') || d.includes('换带') || d.includes('接带') || d.includes('双卷')) return '换卷类';
+            // 换料类
+            if (d.includes('换料') || d.includes('换阳极') || d.includes('换阴极')) return '换料类';
+            // 设备故障
+            if (d.includes('故障') || d.includes('报警') || d.includes('卡') || d.includes('驱动') || d.includes('电机')) return '设备故障';
+            // 工艺调试
             if (d.includes('调试') || d.includes('参数')) return '工艺调试';
+            // 物流堵料
             if (d.includes('堵料') || d.includes('物流')) return '物流堵料';
+            // 来料问题
+            if (d.includes('来料') || d.includes('极耳打折')) return '来料问题';
+            // 断带问题
+            if (d.includes('断带') || d.includes('飞带')) return '断带类';
+            
             return '其他';
         }
         
@@ -1139,11 +1213,12 @@
             container.innerHTML = '<div class="record-list">' + sorted.map(r => `
                 <div class="record-item">
                     <div class="record-header">
-                        <span class="record-title">${r.date} &nbsp; ${r.machine}</span>
+                        <span class="record-title">${r.date || '?'} &nbsp; ${r.machine || '?'}</span>
                         <span class="record-time">${r.duration || 0} min</span>
                     </div>
                     <div class="record-meta">
                         <span class="tag tag-cat">${r.category || '未分类'}</span>
+                        ${r.line ? `<span style="color:#666">🏭 拉线: ${r.line}</span>` : ''}
                         ${r.startTime ? `<span style="color:#999">⏱ ${r.startTime} - ${r.endTime || '?'}</span>` : ''}
                         ${r.recorder ? `<span style="color:#999;margin-left:10px">👤 ${r.recorder}</span>` : ''}
                     </div>
@@ -1267,9 +1342,9 @@
             const filename = `停机${type === 'records' ? '记录' : '分析'}_${new Date().toLocaleDateString()}.csv`;
             
             if (type === 'records') {
-                csv += '日期,机台,开始时间,结束时间,停机时长(分钟),停机描述,处理措施,停机分类,记录人\n';
+                csv += '日期,拉线,机台,开始时间,结束时间,停机时长(分钟),停机描述,处理措施,停机分类,记录人\n';
                 records.forEach(r => {
-                    csv += `${r.date},${r.machine},${r.startTime || ''},${r.endTime || ''},${r.duration || 0},"${r.description || ''}","${r.action || ''}",${r.category || ''},${r.recorder || ''}\n`;
+                    csv += `${r.date || ''},${r.line || ''},${r.machine || ''},${r.startTime || ''},${r.endTime || ''},${r.duration || 0},"${r.description || ''}","${r.action || ''}",${r.category || ''},${r.recorder || ''}\n`;
                 });
             } else {
                 csv += '统计维度,项目,停机次数,累计时长(分钟),平均时长(分钟),占比(%)\n';
